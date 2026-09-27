@@ -1,6 +1,6 @@
 """Собирает пример таблицы (examples/budget_demo.xlsx) и картинки диаграмм для документации.
 
-Запуск из папки budget-bot:  python scripts/make_demo.py
+Запуск из корня репозитория:  python scripts/make_demo.py
 """
 
 import sys

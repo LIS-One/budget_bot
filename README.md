@@ -58,7 +58,7 @@
 ## Быстрый старт
 
 ```bash
-cd budget-bot
+git clone https://github.com/LIS-One/budget_bot.git && cd budget_bot
 cp .env.example .env          # впиши BOT_TOKEN от @BotFather и свои Telegram ID
 docker compose up -d --build  # или: python -m venv .venv && pip install -r requirements.txt && python -m budget_bot
 ```

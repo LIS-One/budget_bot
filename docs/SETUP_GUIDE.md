@@ -63,28 +63,23 @@ ID нужен, чтобы закрыть бота от посторонних: �
 
 ## 4. Скачать код
 
-Бот лежит в папке `budget-bot` репозитория.
+Код бота — в репозитории [LIS-One/budget_bot](https://github.com/LIS-One/budget_bot).
 
 **Через git** (на сервере или на компьютере):
 
 ```bash
-git clone https://github.com/LIS-One/Artie-app.git
-cd Artie-app/budget-bot
+git clone https://github.com/LIS-One/budget_bot.git
+cd budget_bot
 ```
 
-> Пока изменения не влиты в основную ветку, код находится в ветке
-> `claude/telegram-budget-tracker-bot-zdfqq8`. Тогда клонируй так:
-> `git clone -b claude/telegram-budget-tracker-bot-zdfqq8 https://github.com/LIS-One/Artie-app.git`
->
 > Если репозиторий приватный, git попросит логин GitHub и вместо пароля — персональный токен
 > (GitHub → Settings → Developer settings → Personal access tokens).
 
-**Без git:** на странице репозитория на GitHub нажми **Code → Download ZIP**, распакуй архив
-и открой папку `budget-bot`.
+**Без git:** на странице репозитория на GitHub нажми **Code → Download ZIP** и распакуй архив.
 
 ## 5. Заполнить файл настроек .env
 
-В папке `budget-bot` скопируй пример настроек:
+В папке `budget_bot` скопируй пример настроек:
 
 ```bash
 cp .env.example .env        # Linux / macOS
@@ -111,7 +106,7 @@ SUMMARY_TIME=09:00
    - Windows / macOS — с [python.org/downloads](https://www.python.org/downloads/).
      На Windows при установке поставь галочку **«Add python.exe to PATH»**.
    - Linux — `sudo apt install python3 python3-venv`.
-2. Открой терминал в папке `budget-bot` и выполни:
+2. Открой терминал в папке `budget_bot` и выполни:
 
    **Windows (PowerShell):**
    ```powershell
@@ -158,8 +153,8 @@ docker --version && docker compose version   # проверка
 
 ```bash
 apt-get install -y git
-git clone https://github.com/LIS-One/Artie-app.git   # см. примечание про ветку в шаге 4
-cd Artie-app/budget-bot
+git clone https://github.com/LIS-One/budget_bot.git
+cd budget_bot
 cp .env.example .env
 nano .env        # вписать BOT_TOKEN и ALLOWED_USER_IDS, сохранить: Ctrl+O, Enter, Ctrl+X
 ```
@@ -182,7 +177,7 @@ docker compose logs -f      # выход из просмотра — Ctrl+C (б�
 Должна появиться строка `Запускаю бота. Данные: /app/data, часовой пояс: Asia/Jerusalem`.
 Теперь напиши боту `/start` в Telegram.
 
-**Полезные команды** (выполнять в папке `Artie-app/budget-bot`):
+**Полезные команды** (выполнять в папке `budget_bot`):
 
 | Что сделать | Команда |
 |---|---|
@@ -204,20 +199,20 @@ docker compose logs -f      # выход из просмотра — Ctrl+C (б�
 ```bash
 apt-get update && apt-get install -y python3 python3-venv git
 useradd --system --create-home budgetbot
-cd /opt && git clone https://github.com/LIS-One/Artie-app.git
-cd /opt/Artie-app/budget-bot
+cd /opt && git clone https://github.com/LIS-One/budget_bot.git
+cd /opt/budget_bot
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 cp .env.example .env && nano .env            # BOT_TOKEN, ALLOWED_USER_IDS
-chown -R budgetbot:budgetbot /opt/Artie-app/budget-bot
+chown -R budgetbot:budgetbot /opt/budget_bot
 cp deploy/budget-bot.service /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now budget-bot
 journalctl -u budget-bot -f                  # логи
 ```
 
-Данные будут в `/opt/Artie-app/budget-bot/data`. Обновление:
-`cd /opt/Artie-app && git pull && systemctl restart budget-bot`.
+Данные будут в `/opt/budget_bot/data`. Обновление:
+`cd /opt/budget_bot && git pull && systemctl restart budget-bot`.
 
 ## 7. Первая настройка бюджета в боте
 
@@ -314,9 +309,9 @@ journalctl -u budget-bot -f                  # логи
   - `backups/` — резервные копии.
 - Копия всех данных с сервера на компьютер (Docker): на сервере
   `docker compose cp budget-bot:/app/data ./backup-$(date +%F)`, затем с компьютера
-  `scp -r root@IP_СЕРВЕРА:Artie-app/budget-bot/backup-* .`
+  `scp -r root@IP_СЕРВЕРА:budget_bot/backup-* .`
 - Автоматическая копия раз в сутки (Docker): `crontab -e` и строка
-  `0 4 * * * cd /root/Artie-app/budget-bot && docker compose cp budget-bot:/app/data ./backup-$(date +\%F)`
+  `0 4 * * * cd /root/budget_bot && docker compose cp budget-bot:/app/data ./backup-$(date +\%F)`
 - Обновление: `git pull`, затем `docker compose up -d --build` (Docker) или
   `systemctl restart budget-bot` (systemd). Данные при обновлении сохраняются.
 
@@ -355,7 +350,7 @@ journalctl -u budget-bot -f                  # логи
 | После перезапуска бот «догоняет» пропущенные дни | Так и задумано: регулярные платежи и списания за время простоя записываются при запуске. |
 
 Для разработчиков: тесты запускаются так —
-`pip install -r requirements-dev.txt && pytest` (в папке `budget-bot`).
+`pip install -r requirements-dev.txt && pytest` (в папке `budget_bot`).
 
 ## 14. Безопасность и приватность
 
