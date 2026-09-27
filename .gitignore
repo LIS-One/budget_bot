@@ -1,0 +1,11 @@
+# секреты и данные пользователей — никогда не коммитим
+.env
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/

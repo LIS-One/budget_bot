@@ -1,0 +1,18 @@
+# systemd-сервис для запуска бота без Docker.
+# Скопируй в /etc/systemd/system/budget-bot.service и поправь пути, если клонировал в другое место.
+[Unit]
+Description=Telegram budget bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=budgetbot
+WorkingDirectory=/opt/Artie-app/budget-bot
+EnvironmentFile=/opt/Artie-app/budget-bot/.env
+ExecStart=/opt/Artie-app/budget-bot/.venv/bin/python -m budget_bot
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
