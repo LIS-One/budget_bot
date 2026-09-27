@@ -195,10 +195,16 @@ def tx_card_text(data: UserData, tx: Transaction) -> str:
     return "\n".join(lines)
 
 
+def _when(tx: Transaction, now: datetime) -> str:
+    """« за 26.09» — если операция записана задним числом."""
+    return "" if tx.at.date() == now.date() else f" за {fmt.dmy(tx.at)}"
+
+
 def expense_saved_text(data: UserData, tx: Transaction, now: datetime) -> str:
     cur = data.profile.currency
     m = _m(data)
-    lines = [f"✅ Записал: <b>{fmt.MINUS}{fmt.money(tx.amount, cur)}</b> · {data.category_label(tx.category)}"]
+    lines = [f"✅ Записал{_when(tx, now)}: <b>{fmt.MINUS}{fmt.money(tx.amount, cur)}</b> · "
+             f"{data.category_label(tx.category)}"]
     details = []
     if tx.comment:
         details.append(f"«{esc(tx.comment)}»")
@@ -209,7 +215,9 @@ def expense_saved_text(data: UserData, tx: Transaction, now: datetime) -> str:
         stats = finance.month_stats(data, tx.at.date(), now)
         cs = next((c for c in stats.categories if c.name == cat.name), None)
         if cs and cat.limit > 0:
-            if cs.over:
+            if not stats.is_current:
+                lines.append(f"{fmt.MONTHS_NOM[stats.month.month - 1]} в категории: {m(cs.spent)} из {m(cs.limit)}")
+            elif cs.over:
                 lines.append(f"🔴 Лимит «{esc(cat.name)}» превышен на {m(cs.spent - cs.limit)}")
             else:
                 lines.append(f"Осталось в категории: {m(cs.left)} из {m(cs.limit)}")
@@ -222,5 +230,5 @@ def expense_saved_text(data: UserData, tx: Transaction, now: datetime) -> str:
 def income_saved_text(data: UserData, tx: Transaction, now: datetime) -> str:
     cur = data.profile.currency
     comment = f" «{esc(tx.comment)}»" if tx.comment else ""
-    return (f"✅ Доход: <b>+{fmt.money(tx.amount, cur)}</b>{comment}\n"
+    return (f"✅ Доход{_when(tx, now)}: <b>+{fmt.money(tx.amount, cur)}</b>{comment}\n"
             f"🏦 На счету теперь ≈ {fmt.money(finance.account_balance(data, now), cur)}")

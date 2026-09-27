@@ -17,7 +17,7 @@ async def test_start_stop_with_jobs_and_persistence(cfg):
     await app.start()
     try:
         names = sorted(job.name for job in app.job_queue.jobs())
-        assert names == ["daily", "startup", "weekly"]
+        assert names == ["daily", "reminders", "startup", "weekly"]
         weekly = next(j for j in app.job_queue.jobs() if j.name == "weekly")
         nxt = weekly.next_t.astimezone(cfg.timezone)
         assert (nxt.hour, nxt.minute, nxt.isoweekday()) == (9, 0, 7)  # воскресенье 09:00 по Израилю

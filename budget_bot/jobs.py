@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 
 from telegram.error import Forbidden
 from telegram.ext import Application, ContextTypes
@@ -13,10 +13,18 @@ from . import finance, fmt, reports
 from .fmt import esc
 from .handlers.common import kb
 from .handlers.views import summary_markup
-from .models import UserData
+from .models import SOURCE_AUTO, UserData
 from .services import Services
 
 log = logging.getLogger(__name__)
+
+REMINDER_CHECK_EVERY = 300  # секунд: как часто проверять, кому пора напомнить
+REMINDER_WINDOW = timedelta(hours=3)  # после перезапуска не напоминаем «вчерашним» временем среди ночи
+REMINDER_TEXT = (
+    "🌙 Сегодня ещё ничего не записано. Всё верно?\n"
+    "Если траты были — просто напиши их, например: <code>45 кофе</code>\n"
+    "<i>Вспомнил(а) про вчера? <code>вчера 45 кофе</code></i>"
+)
 
 
 def _svc(app: Application) -> Services:
@@ -110,6 +118,44 @@ async def run_weekly(app: Application) -> None:
         await asyncio.sleep(0.05)
 
 
+async def run_reminders(app: Application) -> None:
+    """Вечернее напоминание тем, кто сегодня ничего не записал (время у каждого своё)."""
+    s = _svc(app)
+    now = s.now()
+    today = now.date()
+    for user_id in s.registry.ids():
+        prefs = s.registry.prefs(user_id)
+        rec = s.registry.user(user_id) or {}
+        if not prefs["reminder"] or rec.get("reminded_on") == today.isoformat():
+            continue
+        try:
+            due = datetime.combine(today, time.fromisoformat(prefs["reminder"]))
+        except ValueError:
+            log.warning("user %s: неверное время напоминания %r", user_id, prefs["reminder"])
+            continue
+        if not due <= now < due + REMINDER_WINDOW:
+            continue
+        try:
+            data = s.store.load(user_id)
+            if data is None:
+                continue
+            s.registry.upsert(user_id, reminded_on=today.isoformat())
+            if any(t.at.date() == today and t.source != SOURCE_AUTO for t in data.transactions):
+                continue
+            await app.bot.send_message(_chat(s, user_id), REMINDER_TEXT, reply_markup=kb([
+                [("✅ Сегодня трат не было", "rm|ok")], [("🔕 Не напоминать", "rm|off")],
+            ]))
+        except Forbidden:
+            log.info("user %s заблокировал бота — выключаю напоминания", user_id)
+            s.registry.upsert(user_id, reminder="")
+        except Exception:  # noqa: BLE001
+            log.exception("reminders: ошибка у пользователя %s", user_id)
+
+
+async def _reminder_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    await run_reminders(context.application)
+
+
 async def _daily_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     await run_daily(context.application)
 
@@ -130,4 +176,5 @@ def schedule(app: Application) -> None:
     jq.run_daily(_daily_job, time=s.cfg.daily_time.replace(tzinfo=tz), name="daily")
     jq.run_daily(_weekly_job, time=s.cfg.summary_time.replace(tzinfo=tz), days=(s.cfg.summary_weekday,),
                  name="weekly")
+    jq.run_repeating(_reminder_job, interval=REMINDER_CHECK_EVERY, first=30, name="reminders")
     jq.run_once(_startup_job, when=10, name="startup")

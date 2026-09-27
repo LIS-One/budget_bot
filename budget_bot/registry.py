@@ -12,6 +12,8 @@ import secrets
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+REMINDER_DEFAULT = "21:00"  # вечернее напоминание записать траты; "" — выключено
+
 INVITE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 INVITE_LEN = 6
 INVITE_TTL = timedelta(days=7)
@@ -57,6 +59,16 @@ class Registry:
     def name(self, user_id: int) -> str:
         rec = self.user(user_id) or {}
         return rec.get("name") or "Партнёр"
+
+    def prefs(self, user_id: int) -> dict:
+        """Настройки уведомлений пользователя (со значениями по умолчанию)."""
+        rec = self.user(user_id) or {}
+        return {
+            "summary": rec.get("notify", True),
+            "limits": rec.get("limit_alerts", True),
+            "partner": rec.get("partner_alerts", False),
+            "reminder": rec.get("reminder", REMINDER_DEFAULT),
+        }
 
     def last_processed(self, user_id: int) -> date | None:
         value = (self.user(user_id) or {}).get("last_processed")

@@ -15,7 +15,7 @@ from .. import finance, fmt, planner
 from ..categories import CUSTOM_EMOJI, max_cut, normalize, short_label, split_emoji
 from ..fmt import esc
 from ..models import ACCOUNT, SPECIAL_CATEGORIES, Card, Category, FixedExpense, UserData
-from ..parsing import find_numbers, parse_amount, parse_day, parse_items, parse_name
+from ..parsing import find_numbers, parse_amount, parse_clock, parse_day, parse_items, parse_name
 from .common import Ctx, answer, chunk, clear_await, kb, load, need_setup, safe_delete, save, set_await, show, svc
 
 BACK_MAIN = ("⬅️ Назад", "st|main")
@@ -27,7 +27,7 @@ def main_screen(data: UserData, context: Ctx):
     p = data.profile
     cur = p.currency
     m = lambda x: fmt.money(x, cur)  # noqa: E731
-    notify = (s.registry.user(data.user_id) or {}).get("notify", True)
+    prefs = s.registry.prefs(data.user_id)
     cards = ", ".join(f"{esc(c.name)} ({c.charge_day}-го)" for c in data.cards) or "нет"
     lines = [
         "⚙️ <b>Настройки</b>", "",
@@ -40,17 +40,68 @@ def main_screen(data: UserData, context: Ctx):
         lines.append(f"💰 Отложится по плану: {m(data.planned_savings)}")
     lines += [
         f"💳 Карты: {cards}",
-        "🔔 Сводки: " + (f"{s.cfg.summary_days} в {s.cfg.summary_time:%H:%M}" if notify else "выключены"),
+        "🔔 Уведомления: сводка " + ("✅" if prefs["summary"] else "❌") + " · лимиты "
+        + ("✅" if prefs["limits"] else "❌") + " · напоминание " + (prefs["reminder"] or "❌"),
         f"💱 Валюта: {cur}",
     ]
     rows = [
         [("🏷 Категории и лимиты", "st|cats"), ("📌 Постоянные", "st|fixed")],
         [("💼 Доход", "st|inc"), ("🎯 Накопления", "st|goal")],
-        [("💳 Карты", "st|cards"), ("🔔 Сводки: вкл" if notify else "🔕 Сводки: выкл", "st|notify")],
+        [("💳 Карты", "st|cards"), ("🔔 Уведомления", "st|notify")],
         [("💱 Валюта", "st|cur"), ("🔄 Анкета заново", "st|rerun")],
         [("🗑 Удалить мои данные", "st|del")],
     ]
     return "\n".join(lines), kb(rows)
+
+
+REMINDER_TIMES = ("20:00", "21:00", "22:00", "23:00")
+
+
+def _onoff(flag: bool) -> str:
+    return "✅ вкл" if flag else "❌ выкл"
+
+
+def notify_screen(data: UserData, context: Ctx, note: str = ""):
+    s = svc(context)
+    prefs = s.registry.prefs(data.user_id)
+    has_partner = s.registry.partner(data.user_id) is not None
+    lines = ([note, ""] if note else []) + [
+        "🔔 <b>Уведомления</b>", "",
+        f"📬 Сводка за неделю ({s.cfg.summary_days} в {s.cfg.summary_time:%H:%M}): {_onoff(prefs['summary'])}",
+        f"⚠️ Предупреждения, когда категория дошла до 80% и 100% лимита: {_onoff(prefs['limits'])}",
+        f"👀 Сообщать партнёру о моих лимитах: {_onoff(prefs['partner'])}"
+        + ("" if has_partner else " <i>(пары пока нет)</i>"),
+        "🌙 Вечернее напоминание, если за день ничего не записано: "
+        + (f"в {prefs['reminder']}" if prefs["reminder"] else "❌ выкл"),
+    ]
+    rows = [
+        [("📬 Сводка", "st|ntsum"), ("⚠️ Лимиты", "st|ntlim")],
+        [("👀 Партнёру о лимитах", "st|ntpar")],
+        [("🌙 Напоминание: " + (prefs["reminder"] or "выкл"), "st|ntrem")],
+        [BACK_MAIN],
+    ]
+    return "\n".join(lines), kb(rows)
+
+
+def reminder_screen(data: UserData, context: Ctx):
+    current = svc(context).registry.prefs(data.user_id)["reminder"]
+    text = ("🌙 <b>Вечернее напоминание</b>\n\nЕсли за день не записано ни одной траты, я спрошу, всё ли верно. "
+            f"Сейчас: {'в ' + current if current else 'выключено'}.\n\nВыбери время:")
+    rows = [
+        [((f"✓ {t}" if t == current else t), f"st|ntremset|{i}") for i, t in enumerate(REMINDER_TIMES)],
+        [("✍️ Своё время", "st|ntremtxt"), ("🔕 Выключить", "st|ntremoff")],
+        [("⬅️ Назад", "st|notify")],
+    ]
+    return text, kb(rows)
+
+
+def set_reminder(context: Ctx, user_id: int, value: str) -> None:
+    """Сохраняет время напоминания; если сегодня оно уже прошло — начинаем с завтра."""
+    s = svc(context)
+    fields = {"reminder": value}
+    if value and value <= f"{s.now():%H:%M}":
+        fields["reminded_on"] = s.today().isoformat()
+    s.registry.upsert(user_id, **fields)
 
 
 def cats_screen(data: UserData, note: str = ""):
@@ -356,9 +407,22 @@ async def on_settings(update: Update, context: Ctx) -> None:
         await prompt("➕ Как называется карта? Например: <code>Max</code>", "cdnew", "st|cards", stage="name")
     # прочее
     elif action == "notify":
-        rec = s.registry.user(data.user_id) or {}
-        s.registry.upsert(data.user_id, notify=not rec.get("notify", True))
-        await render(main_screen(data, context))
+        await render(notify_screen(data, context))
+    elif action in ("ntsum", "ntlim", "ntpar"):
+        field = {"ntsum": ("notify", "summary"), "ntlim": ("limit_alerts", "limits"),
+                 "ntpar": ("partner_alerts", "partner")}[action]
+        s.registry.upsert(data.user_id, **{field[0]: not s.registry.prefs(data.user_id)[field[1]]})
+        await render(notify_screen(data, context))
+    elif action == "ntrem":
+        await render(reminder_screen(data, context))
+    elif action == "ntremset" and valid(list(REMINDER_TIMES), idx):
+        set_reminder(context, data.user_id, REMINDER_TIMES[idx])
+        await render(notify_screen(data, context, f"✅ Напоминание — в {REMINDER_TIMES[idx]}."))
+    elif action == "ntremoff":
+        set_reminder(context, data.user_id, "")
+        await render(notify_screen(data, context, "🔕 Напоминание выключено."))
+    elif action == "ntremtxt":
+        await prompt("✍️ Во сколько напоминать? Напиши время, например: <code>21:30</code>", "remtime", "st|ntrem")
     elif action == "cur":
         rows = [[(c, f"st|setcur|{i}") for i, c in enumerate(fmt.CURRENCIES)], [BACK_MAIN]]
         await show(context, chat_id, msg_id, "💱 Выбери валюту — суммы в боте и в таблице будут с этим знаком.",
@@ -482,6 +546,15 @@ async def await_settings(update: Update, context: Ctx, state: dict) -> None:
         cat.keywords = words[:200]
         return await done(cat_screen(data, i, now, "✅ Ключевые слова сохранены."))
 
+    if what == "remtime":
+        value = parse_clock(text)
+        if value is None:
+            return await error("Не понял время. Напиши, например: 21:30")
+        set_reminder(context, data.user_id, value)
+        clear_await(context)
+        await show(context, chat_id, msg_id, *notify_screen(data, context, f"✅ Напоминание — в {value}."))
+        return
+
     if what == "catnew":
         nums = find_numbers(text)
         limit = abs(nums[0].value) if nums else 0.0
@@ -604,3 +677,17 @@ async def await_settings(update: Update, context: Ctx, state: dict) -> None:
         return await done(cards_screen(data, now, f"✅ Карта «{esc(state['card_name'])}» добавлена. Новые траты по "
                                                   "умолчанию идут на первую карту в списке."))
     clear_await(context)
+
+
+# --- кнопки под вечерним напоминанием «rm|…» --------------------------------------------------------------
+async def on_reminder(update: Update, context: Ctx) -> None:
+    query = update.callback_query
+    action = query.data.split("|")[1]
+    await answer(update)
+    chat_id = update.effective_chat.id
+    msg_id = query.message.message_id
+    if action == "ok":
+        await show(context, chat_id, msg_id, "👍 Отлично — день без трат! До завтра.")
+    elif action == "off":
+        set_reminder(context, update.effective_user.id, "")
+        await show(context, chat_id, msg_id, "🔕 Напоминания выключены. Включить снова: ⚙️ Настройки → 🔔 Уведомления.")

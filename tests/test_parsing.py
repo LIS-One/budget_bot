@@ -58,3 +58,58 @@ def test_parse_day_and_name():
     assert parse_day("45") is None
     assert parse_name("=SUM(A1) Кафе*") == "SUM(A1) Кафе"
     assert parse_name("Кафе <b>&") == "Кафе b"
+
+
+# --- даты задним числом ---------------------------------------------------------------------------------
+from datetime import date  # noqa: E402
+
+from budget_bot.parsing import DateError, parse_clock, parse_date, split_date  # noqa: E402
+
+TODAY = date(2026, 9, 27)
+
+
+@pytest.mark.parametrize("text, day, rest", [
+    ("вчера 45 кофе", date(2026, 9, 26), "45 кофе"),
+    ("кофе позавчера 45", date(2026, 9, 25), "кофе   45"),
+    ("25.09 120 продукты", date(2026, 9, 25), "120 продукты"),
+    ("25 сентября 120 продукты", date(2026, 9, 25), "120 продукты"),
+    ("3 янв 50 такси", date(2026, 1, 3), "50 такси"),
+    ("25.12 100 подарок", date(2025, 12, 25), "100 подарок"),  # в будущем > месяца → прошлый год
+    ("25.09.2026 45 кофе", date(2026, 9, 25), "45 кофе"),
+    ("25.09.26 45 кофе", date(2026, 9, 25), "45 кофе"),
+    ("2 марта 2026 кофе 45", date(2026, 3, 2), "кофе 45"),
+    ("25.09 кофе", None, "25.09 кофе"),  # без второй суммы это сумма 25,09
+    ("12.50 кофе", None, "12.50 кофе"),
+    ("1.5k телефон", None, "1.5k телефон"),
+    ("кофе 25.09 45", None, "кофе 25.09 45"),  # дата — только в начале
+])
+def test_split_date(text, day, rest):
+    assert split_date(text, TODAY) == (day, rest)
+
+
+@pytest.mark.parametrize("text", ["30.09 45 кофе", "01.10.2026 45", "10 окт 45", "31.02 45", "29.02 50 кофе"])
+def test_split_date_errors(text):
+    with pytest.raises(DateError):
+        split_date(text, TODAY)
+
+
+def test_parse_entry_with_date():
+    e = parse_entry("вчера +500 кешбэк", TODAY)
+    assert (e.amount, e.comment, e.income, e.day) == (500, "кешбэк", True, date(2026, 9, 26))
+    assert parse_entry("сегодня 45 кофе", TODAY).day is None
+    assert parse_entry("45 кофе", TODAY).day is None
+    assert parse_entry("25.09 кофе", TODAY).amount == 25.09
+
+
+def test_parse_date_and_clock():
+    assert parse_date("вчера", TODAY) == date(2026, 9, 26)
+    assert parse_date("25.09", TODAY) == date(2026, 9, 25)
+    assert parse_date("25 сентября", TODAY) == date(2026, 9, 25)
+    assert parse_date("abc", TODAY) is None
+    assert parse_date("25.09 кофе", TODAY) is None
+    with pytest.raises(DateError):
+        parse_date("30.09", TODAY)
+    assert parse_clock("21") == "21:00"
+    assert parse_clock("21:30") == "21:30"
+    assert parse_clock("9.05") == "09:05"
+    assert parse_clock("25:00") is None and parse_clock("вечером") is None

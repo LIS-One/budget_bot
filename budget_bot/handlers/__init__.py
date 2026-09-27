@@ -49,6 +49,7 @@ AWAIT_HANDLERS = {
     "income_amount": entries.await_income_amount,
     "tx_amount": entries.await_tx_amount,
     "tx_comment": entries.await_tx_comment,
+    "tx_date": entries.await_tx_date,
     "set_balance": views.await_set_balance,
     "set_card_pending": views.await_set_card_pending,
     "settings": settings.await_settings,
@@ -144,6 +145,7 @@ def register(app: Application) -> None:
     app.add_handler(CallbackQueryHandler(_callback(partner.on_partner), pattern=r"^pr\|"))
     app.add_handler(CallbackQueryHandler(_callback(partner.on_partner_view), pattern=r"^pv\|"))
     app.add_handler(CallbackQueryHandler(_callback(excel_io.on_import), pattern=r"^xl\|"))
+    app.add_handler(CallbackQueryHandler(_callback(settings.on_reminder), pattern=r"^rm\|"))
     app.add_handler(MessageHandler(private & filters.Document.ALL, guarded(excel_io.on_document)))
     app.add_handler(MessageHandler(private & filters.TEXT & ~filters.COMMAND, on_text))
     app.add_handler(MessageHandler(private & ~filters.TEXT & ~filters.COMMAND & ~filters.StatusUpdate.ALL, on_other))

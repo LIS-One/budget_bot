@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import date, timedelta
 
 from .models import MAX_COMMENT_LEN, MAX_NAME_LEN
 
@@ -112,16 +113,98 @@ def to_monthly(value: float, period: str | None, default: str = "month") -> floa
     return value * factor
 
 
+# --- даты: «вчера 45 кофе», «25.09 120 продукты», «25 сентября 120 продукты» ----------------------------
+class DateError(ValueError):
+    """Дата понятна, но не подходит (в будущем или такой даты нет) — текст ошибки для пользователя."""
+
+
+_RELATIVE_DAYS = re.compile(r"(?i)(?<![\w])(позавчера|вчера|сегодня)(?![\w])")
+_RELATIVE_SHIFT = {"сегодня": 0, "вчера": 1, "позавчера": 2}
+_MONTH_WORDS = (
+    (r"январ[яье]?|янв", 1), (r"феврал[яье]?|фев", 2), (r"марта?|мар", 3), (r"апрел[яье]?|апр", 4),
+    (r"мая|май", 5), (r"июн[яье]?|июн", 6), (r"июл[яье]?|июл", 7), (r"августа?|авг", 8),
+    (r"сентябр[яье]?|сент|сен", 9), (r"октябр[яье]?|окт", 10), (r"ноябр[яье]?|ноя", 11), (r"декабр[яье]?|дек", 12),
+)
+_MONTH_RE = "|".join(f"(?P<m{num}>{words})" for words, num in _MONTH_WORDS)
+_DATE_WORDS = re.compile(rf"(?i)^\s*(?P<d>\d{{1,2}})\s+(?:{_MONTH_RE})\.?(?:\s+(?P<y>\d{{4}}))?(?=[\s,.;:]|$)")
+_DATE_FULL = re.compile(r"^\s*(?P<d>\d{1,2})[./](?P<m>\d{1,2})[./](?P<y>\d{4}|\d{2})(?=[\s,;:]|$)")
+_DATE_SHORT = re.compile(r"^\s*(?P<d>\d{1,2})[./](?P<m>\d{1,2})(?=[\s,;:]|$)")
+FUTURE_GRACE_DAYS = 31  # «25.12» в январе — это прошлый декабрь, а «30.09» 27 сентября — опечатка
+
+
+def _make_date(day: int, month: int, year: int | None, today: date, shown: str) -> date:
+    if year is not None and year < 100:
+        year += 2000
+    try:
+        result = date(year or today.year, month, day)
+    except ValueError:
+        raise DateError(f"Такой даты нет: {shown}") from None
+    if result > today:
+        if year is None and (result - today).days > FUTURE_GRACE_DAYS:
+            try:
+                return date(today.year - 1, month, day)
+            except ValueError:  # 29 февраля прошлого года
+                raise DateError(f"Такой даты нет: {shown}") from None
+        raise DateError(f"Дата {shown} ещё не наступила — трату можно записать только задним числом.")
+    return result
+
+
+def split_date(text: str, today: date) -> tuple[date | None, str]:
+    """Отделяет дату от записи: «вчера» / «позавчера» / «сегодня» — в любом месте, а «25.09»,
+    «25.09.2026», «25 сентября» — в начале сообщения. «25.09» без года считается датой, только
+    если в сообщении есть ещё и сумма (иначе это сумма 25,09). Бросает DateError."""
+    text = text or ""
+    m = _RELATIVE_DAYS.search(text)
+    if m:
+        rest = (text[: m.start()] + " " + text[m.end():]).strip()
+        return today - timedelta(days=_RELATIVE_SHIFT[m.group(1).lower()]), rest
+    m = _DATE_FULL.match(text)
+    if m:
+        day = _make_date(int(m["d"]), int(m["m"]), int(m["y"]), today, m.group(0).strip())
+        return day, text[m.end():].strip()
+    m = _DATE_WORDS.match(text)
+    if m:
+        month = next(num for num in range(1, 13) if m.group(f"m{num}"))
+        year = int(m["y"]) if m["y"] else None
+        day = _make_date(int(m["d"]), month, year, today, m.group(0).strip())
+        return day, text[m.end():].strip()
+    m = _DATE_SHORT.match(text)
+    if m and 1 <= int(m["m"]) <= 12 and find_numbers(text[m.end():]):
+        day = _make_date(int(m["d"]), int(m["m"]), None, today, m.group(0).strip())
+        return day, text[m.end():].strip()
+    return None, text.strip()
+
+
+def parse_date(text: str, today: date) -> date | None:
+    """Дата сама по себе (для «📅 Дата» у операции): «вчера», «25.09», «25 сентября», «25.09.2026»."""
+    text = (text or "").strip()
+    day, rest = split_date(text, today)
+    if day is None:
+        m = _DATE_SHORT.match(text)
+        if m and 1 <= int(m["m"]) <= 12:
+            day, rest = _make_date(int(m["d"]), int(m["m"]), None, today, m.group(0).strip()), text[m.end():]
+    return day if day is not None and not rest.strip(" .,") else None
+
+
 @dataclass
 class Entry:
     amount: float
     comment: str
     income: bool
+    day: date | None = None  # дата, если трату записывают задним числом
 
 
-def parse_entry(text: str) -> Entry | None:
-    """«45 кофе», «кофе 45₪», «+12000 зарплата» → сумма, комментарий, признак дохода."""
+def parse_entry(text: str, today: date | None = None) -> Entry | None:
+    """«45 кофе», «кофе 45₪», «+12000 зарплата», «вчера 45 кофе» → сумма, комментарий, доход, дата.
+
+    С today распознаёт дату в начале/слова «вчера» и может бросить DateError.
+    """
     text = (text or "").strip()
+    day = None
+    if today is not None:
+        day, text = split_date(text, today)
+        if day == today:
+            day = None
     nums = [n for n in find_numbers(text) if n.value != 0]
     if not nums:
         return None
@@ -131,7 +214,7 @@ def parse_entry(text: str) -> Entry | None:
         return None
     income = text.startswith("+")
     comment = _clean_label(text[: first.start] + " " + text[first.end:], MAX_COMMENT_LEN)
-    return Entry(round(amount, 2), comment, income)
+    return Entry(round(amount, 2), comment, income, day)
 
 
 def parse_items(text: str, default_name: str = "Без названия") -> list[tuple[str, float]]:
@@ -174,6 +257,17 @@ def parse_day(text: str) -> int | None:
         return None
     day = int(m.group(1))
     return day if 1 <= day <= 31 else None
+
+
+def parse_clock(text: str) -> str | None:
+    """«21», «21:30», «9.05» → «21:00», «21:30», «09:05»."""
+    m = re.fullmatch(r"\s*(\d{1,2})(?:\s*[:.\s]\s*(\d{2}))?\s*", text or "")
+    if not m:
+        return None
+    hours, minutes = int(m.group(1)), int(m.group(2) or 0)
+    if hours > 23 or minutes > 59:
+        return None
+    return f"{hours:02d}:{minutes:02d}"
 
 
 def parse_name(text: str, max_len: int = MAX_NAME_LEN) -> str:
